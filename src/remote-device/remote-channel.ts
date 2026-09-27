@@ -173,6 +173,10 @@ async function clockAwareFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     return response;
 }
 
+function isOwnedStockQueryShapeUnsupported(error: any): boolean {
+    return error?.code === 'PGRST100' && error?.message === 'Invalid request';
+}
+
 export class RemoteChannel {
     private client: SupabaseClient | null = null;
     private channel: RealtimeChannel | null = null;
@@ -912,7 +916,7 @@ export class RemoteChannel {
         let claimError: any = null;
         for (const delayMs of [0, 500, 1500]) {
             if (delayMs > 0) await this.sleep(delayMs);
-            const { data, error } = await this.client
+            let { data, error } = await this.client
                 .from('mcp_remote_calls')
                 .update({ status: 'executing' })
                 .eq('id', callId)
@@ -920,6 +924,22 @@ export class RemoteChannel {
                 .eq('status', 'pending')
                 .gt('timeout_at', new Date(Date.now()).toISOString())
                 .select('*');
+
+            if (isOwnedStockQueryShapeUnsupported(error)) {
+                // The owned stock-compatible adapter rejects the extra client-side
+                // timeout filter, but its server-side claim remains authoritative
+                // for expiry/status/device checks. Never use this fallback for
+                // auth, transport, or other PostgREST errors.
+                console.debug('[DEBUG] Provider rejected hardened claim query; retrying exact stock claim shape');
+                ({ data, error } = await this.client
+                    .from('mcp_remote_calls')
+                    .update({ status: 'executing' })
+                    .eq('id', callId)
+                    .eq('device_id', this.deviceId)
+                    .eq('status', 'pending')
+                    .select('*'));
+            }
+
             if (!error) {
                 row = data?.[0] ?? null;
                 break;
@@ -1214,13 +1234,23 @@ export class RemoteChannel {
      */
     async markCallExecuting(callId: string): Promise<boolean> {
         if (!this.client) throw new Error('Client not initialized');
-        const { data, error } = await this.client
+        let { data, error } = await this.client
             .from('mcp_remote_calls')
             .update({ status: 'executing' })
             .eq('id', callId)
             .eq('status', 'pending')
             .gt('timeout_at', new Date(Date.now()).toISOString())
             .select('id');
+
+        if (isOwnedStockQueryShapeUnsupported(error)) {
+            console.debug('[DEBUG] Provider rejected hardened mark-executing query; retrying exact stock shape');
+            ({ data, error } = await this.client
+                .from('mcp_remote_calls')
+                .update({ status: 'executing' })
+                .eq('id', callId)
+                .eq('status', 'pending')
+                .select('id'));
+        }
 
         if (error) {
             console.error('[DEBUG] Failed to mark call executing:', error.message);
