@@ -60,6 +60,8 @@ class ConfigManager {
   private pendingMutations: Array<(config: ServerConfig) => void> = [];
   private watcher: FSWatcher | null = null;
   private reloadTimer: NodeJS.Timeout | null = null;
+  private saveRetryTimer: NodeJS.Timeout | null = null;
+  private isShuttingDown = false;
 
   constructor() {
     // Get user's home directory
@@ -73,6 +75,9 @@ class ConfigManager {
    * normal writes so two processes starting together cannot clobber each other.
    */
   async init() {
+    if (this.isShuttingDown) {
+      throw new Error('Config manager is shutting down');
+    }
     if (this.initialized) return;
 
     try {
@@ -265,6 +270,10 @@ class ConfigManager {
   /** Non-blocking, coalesced persistence for high-frequency state updates. */
   scheduleSave(): void {
     if (this.saveScheduled) return;
+    if (this.saveRetryTimer) {
+      clearTimeout(this.saveRetryTimer);
+      this.saveRetryTimer = null;
+    }
     this.saveScheduled = true;
     const write = this.writeChain.then(async () => {
       this.saveScheduled = false;
@@ -278,8 +287,13 @@ class ConfigManager {
         // Persistence failed before commit, so keep these mutations for a later retry.
         this.pendingMutations.unshift(...mutations);
         console.error('Failed to save config (background), will retry:', error);
-        const retry = setTimeout(() => this.scheduleSave(), 250);
-        retry.unref?.();
+        if (!this.isShuttingDown) {
+          this.saveRetryTimer = setTimeout(() => {
+            this.saveRetryTimer = null;
+            this.scheduleSave();
+          }, 250);
+          this.saveRetryTimer.unref?.();
+        }
       }
     });
     this.writeChain = write.catch(() => {});
@@ -298,6 +312,47 @@ class ConfigManager {
       this.watcher.on('error', (error) => console.error('Config watcher error:', error));
     } catch (error) {
       console.error('Failed to watch config:', error);
+    }
+  }
+
+  /** Release process-owned config state during full runtime shutdown. */
+  async shutdown(): Promise<void> {
+    this.isShuttingDown = true;
+    try {
+      if (this.reloadTimer) {
+        clearTimeout(this.reloadTimer);
+        this.reloadTimer = null;
+      }
+      if (this.watcher) {
+        this.watcher.close();
+        this.watcher = null;
+      }
+      if (this.saveRetryTimer) {
+        clearTimeout(this.saveRetryTimer);
+        this.saveRetryTimer = null;
+      }
+
+      // Drain the write already admitted before shutdown. A failed background
+      // write leaves its mutations in pendingMutations and cannot arm a retry
+      // while isShuttingDown is true.
+      await this.writeChain;
+
+      const pending = this.pendingMutations.splice(0);
+      if (pending.length > 0) {
+        try {
+          await this.performConfigMutation((latest) => {
+            for (const mutate of pending) mutate(latest);
+          });
+        } catch (error) {
+          this.pendingMutations.unshift(...pending);
+          console.error('Failed to flush config during shutdown:', error);
+        }
+      }
+
+      this.saveScheduled = false;
+      this.initialized = false;
+    } finally {
+      this.isShuttingDown = false;
     }
   }
 

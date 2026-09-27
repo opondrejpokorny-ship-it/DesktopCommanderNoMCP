@@ -207,7 +207,7 @@ class UsageTracker {
     // Check if client is desktop-commander (disable for this client)
     //return true;
     try {
-      const { currentClient } = await import('../server.js');
+      const { currentClient } = await import('../runtime-context.js');
       if (currentClient?.name === 'desktop-commander') {
         return false;
       }
@@ -432,7 +432,7 @@ class UsageTracker {
 
     // Check if client is desktop-commander (disable for this client)
     try {
-      const { currentClient } = await import('../server.js');
+      const { currentClient } = await import('../runtime-context.js');
       if (currentClient?.name === 'desktop-commander') {
         return false;
       }

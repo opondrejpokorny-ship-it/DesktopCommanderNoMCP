@@ -147,6 +147,11 @@ function getShellSpawnArgs(shellPath: string, command: string): ShellSpawnConfig
 export class TerminalManager {
   private sessions: Map<number, TerminalSession> = new Map();
   private completedSessions: Map<number, CompletedSession> = new Map();
+  private shuttingDown = false;
+
+  initialize(): void {
+    this.shuttingDown = false;
+  }
   
   /**
    * Send input to a running process
@@ -175,6 +180,14 @@ export class TerminalManager {
   }
   
   async executeCommand(command: string, timeoutMs: number = DEFAULT_COMMAND_TIMEOUT, shell?: string, collectTiming: boolean = false): Promise<CommandExecutionResult> {
+    if (this.shuttingDown) {
+      return {
+        pid: -1,
+        output: 'Error: Terminal manager is shutting down; new processes are not accepted.',
+        isBlocked: false,
+      };
+    }
+
     // Get the shell from config if not specified
     let shellToUse: string | boolean | undefined = shell;
     if (!shellToUse) {
@@ -250,6 +263,15 @@ export class TerminalManager {
     // because PowerShell/pwsh have different quote rules and must NOT use verbatim.
     if (process.platform === 'win32' && spawnConfig.windowsVerbatim) {
       spawnOptions.windowsVerbatimArguments = true;
+    }
+
+    // No async work may cross the shutdown boundary into a new child.
+    if (this.shuttingDown) {
+      return {
+        pid: -1,
+        output: 'Error: Terminal manager is shutting down; new processes are not accepted.',
+        isBlocked: false,
+      };
     }
 
     // Spawn the process with appropriate arguments
@@ -787,6 +809,32 @@ export class TerminalManager {
 
   listCompletedSessions(): CompletedSession[] {
     return Array.from(this.completedSessions.values());
+  }
+
+  /** Stop all process sessions owned by this runtime during full shutdown. */
+  async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    const active = Array.from(this.sessions.values());
+    for (const session of active) {
+      try {
+        session.process.kill('SIGTERM');
+      } catch { /* process already gone */ }
+    }
+
+    if (active.length > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      for (const session of active) {
+        if (session.process.exitCode === null) {
+          try {
+            session.process.kill('SIGKILL');
+          } catch { /* process already gone */ }
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    this.sessions.clear();
+    this.completedSessions.clear();
   }
 }
 
