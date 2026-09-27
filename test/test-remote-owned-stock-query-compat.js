@@ -10,63 +10,44 @@ function makeClient(handler,seen){
         update(v){ops.push(['update',v]);return q;},
         eq(k,v){ops.push(['eq',k,v]);return q;},
         gt(k,v){ops.push(['gt',k,v]);return q;},
-        select(v){ops.push(['select',v]);return q;},
-        maybeSingle(){ops.push(['maybeSingle']);seen.push([...ops]);return Promise.resolve(handler(ops));},
-        then(resolve,reject){seen.push([...ops]);return Promise.resolve(handler(ops)).then(resolve,reject);},
+        select(v){ops.push(['select',v]);seen.push([...ops]);return Promise.resolve(handler(ops));},
       };
       return q;
     }
   };
 }
-const has=(ops,name)=>ops.some(x=>x[0]===name);
 const hasEq=(ops,k,v)=>ops.some(x=>x[0]==='eq'&&x[1]===k&&x[2]===v);
+const has=(ops,name)=>ops.some(x=>x[0]===name);
 
-test('doorbell retries exact stock claim shape for owned stock adapter',async()=>{
-  const seen=[]; const delivered=[];
+test('markCallExecuting keeps device and timeout filters on the authoritative claim',async()=>{
+  const seen=[];
   const channel=new RemoteChannel();
   channel.deviceId='dev-1';
-  channel.onToolCall=p=>delivered.push(p);
-  channel.client=makeClient(ops=>{
-    if(has(ops,'update')&&has(ops,'gt')) return {data:null,error:{code:'PGRST100',message:'Invalid request'}};
-    if(has(ops,'update')) return {data:[{id:'call-1',device_id:'dev-1',status:'executing'}],error:null};
-    return {data:null,error:null};
-  },seen);
-  await channel.onDoorbell({call_id:'call-1',device_id:'dev-1'});
-  const stock=seen.find(ops=>has(ops,'update')&&!has(ops,'gt'));
-  assert.ok(stock,'expected stock-shaped fallback update');
-  assert.ok(hasEq(stock,'device_id','dev-1'));
-  assert.ok(hasEq(stock,'status','pending'));
-  assert.equal(delivered.length,1);
-  assert.equal(delivered[0].claimed,true);
+  channel.client=makeClient(()=>({data:[{id:'call-1'}],error:null}),seen);
+  assert.equal(await channel.markCallExecuting('call-1'),true);
+  assert.equal(seen.length,1);
+  assert.ok(hasEq(seen[0],'device_id','dev-1'));
+  assert.ok(hasEq(seen[0],'status','pending'));
+  assert.ok(has(seen[0],'gt'));
 });
 
-test('expired call is not dispatched when server-authoritative stock claim returns no row',async()=>{
-  const seen=[]; const delivered=[];
-  const channel=new RemoteChannel();
-  channel.deviceId='dev-1';
-  channel.onToolCall=p=>delivered.push(p);
-  channel.client=makeClient(ops=>{
-    if(has(ops,'update')&&has(ops,'gt')) return {data:null,error:{code:'PGRST100',message:'Invalid request'}};
-    if(has(ops,'update')) return {data:[],error:null};
-    return {data:null,error:null};
-  },seen);
-  await channel.onDoorbell({call_id:'expired-call',device_id:'dev-1'});
-  assert.equal(delivered.length,0);
-  assert.ok(seen.some(ops=>has(ops,'update')&&!has(ops,'gt')));
-});
-
-test('markCallExecuting falls back only for exact shape incompatibility',async()=>{
-  const seen=[]; const channel=new RemoteChannel();
-  channel.client=makeClient(ops=>has(ops,'gt')
-    ? {data:null,error:{code:'PGRST100',message:'Invalid request'}}
-    : {data:[{id:'call-2'}],error:null},seen);
-  assert.equal(await channel.markCallExecuting('call-2'),true);
-  assert.ok(seen.some(ops=>has(ops,'update')&&!has(ops,'gt')));
-});
-
-test('auth errors never trigger stock-shape fallback',async()=>{
-  const seen=[]; const channel=new RemoteChannel();
-  channel.client=makeClient(()=>({data:null,error:{code:'PGRST301',message:'JWT expired'}}),seen);
-  assert.equal(await channel.markCallExecuting('call-3'),true);
-  assert.equal(seen.some(ops=>has(ops,'update')&&!has(ops,'gt')),false);
+test('all authoritative claim failures fail closed',async()=>{
+  for(const error of [
+    {code:'PGRST301',message:'JWT expired',status:401},
+    {code:'PGRST303',message:'JWT claims validation failed'},
+    {code:'42501',message:'permission denied'},
+    {code:'28000',message:'invalid authorization specification'},
+    {message:'forbidden',status:403},
+    {code:'PGRST500',message:'Request unavailable',status:503},
+    {message:'network unavailable'}
+  ]){
+    const seen=[];
+    const channel=new RemoteChannel();
+    channel.deviceId='dev-1';
+    channel.client=makeClient(()=>({data:null,error}),seen);
+    assert.equal(await channel.markCallExecuting('call-auth'),false);
+    assert.equal(seen.length,1);
+    assert.ok(hasEq(seen[0],'device_id','dev-1'));
+    assert.ok(has(seen[0],'gt'));
+  }
 });
