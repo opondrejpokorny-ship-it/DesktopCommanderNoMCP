@@ -1,3 +1,9 @@
+> [!IMPORTANT]
+> **Using this repository together with `opondrejpokorny-ship-it/desktop-commander-owned-remote` / MY37?**
+> Do **not** use the stock/upstream installation instructions below. The canonical MY37 installer, verified executable pins, security rules, and reboot acceptance live in the paired Owned Remote repository. Start with its `docs/my37-verified-install.json`, then `docs/MY37_CLEAN_INSTALL_RUNBOOK.md`, then `docs/AI_INSTALL_MY37.md`.
+>
+> This repository's `main` branch is not automatically the verified MY37 executable release.
+
 # Desktop Commander MCP
 ### Search, update, manage files and run terminal commands with AI
 
