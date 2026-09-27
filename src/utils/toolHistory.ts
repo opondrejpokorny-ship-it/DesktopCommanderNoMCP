@@ -272,6 +272,10 @@ class ToolHistory {
     output: ServerResult,
     duration?: number
   ): void {
+    if (!this.writeInterval) {
+      this.startWriteProcessor();
+    }
+
     const record: ToolCallRecord = {
       timestamp: new Date().toISOString(),
       toolName,

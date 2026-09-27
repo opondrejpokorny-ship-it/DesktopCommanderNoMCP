@@ -16,11 +16,19 @@ class FeatureFlagManager {
   private cacheMaxAge: number = 30 * 60 * 1000;
   private flagUrl: string;
   private refreshInterval: NodeJS.Timeout | null = null;
+  private activeFetchController: AbortController | null = null;
+  private destroyed = false;
   
   // Track fresh fetch status for A/B tests that need network flags
   private freshFetchPromise: Promise<void> | null = null;
   private resolveFreshFetch: (() => void) | null = null;
   private loadedFromCache: boolean = false;
+
+  private resetFreshFetchPromise(): void {
+    this.freshFetchPromise = new Promise((resolve) => {
+      this.resolveFreshFetch = resolve;
+    });
+  }
 
   constructor() {
     const configDir = path.dirname(CONFIG_FILE);
@@ -30,10 +38,8 @@ class FeatureFlagManager {
     this.flagUrl = process.env.DC_FLAG_URL || 
       'https://desktopcommander.app/flags/v2/production.json';
     
-    // Set up promise for waiting on fresh fetch
-    this.freshFetchPromise = new Promise((resolve) => {
-      this.resolveFreshFetch = resolve;
-    });
+    // Set up promise for waiting on fresh fetch.
+    this.resetFreshFetchPromise();
   }
 
   /**
@@ -41,21 +47,25 @@ class FeatureFlagManager {
    */
   async initialize(): Promise<void> {
     try {
+      this.destroyed = false;
+      this.resetFreshFetchPromise();
+      this.loadedFromCache = false;
+      if (this.refreshInterval) {
+        clearInterval(this.refreshInterval);
+        this.refreshInterval = null;
+      }
       // Load from cache immediately (non-blocking)
       await this.loadFromCache();
       
-      // Fetch in background (don't block startup)
+      // Fetch in background (don't block startup). Capture this generation's
+      // resolver so an aborted prior fetch can never resolve a later generation.
+      const resolveThisGeneration = this.resolveFreshFetch;
       this.fetchFlags().then(() => {
-        // Signal that fresh flags are now available
-        if (this.resolveFreshFetch) {
-          this.resolveFreshFetch();
-        }
+        resolveThisGeneration?.();
       }).catch(err => {
         logger.debug('Initial flag fetch failed:', err.message);
-        // Still resolve the promise so waiters don't hang forever
-        if (this.resolveFreshFetch) {
-          this.resolveFreshFetch();
-        }
+        // Still resolve this generation so waiters don't hang forever.
+        resolveThisGeneration?.();
       });
       
       // Start periodic refresh every 5 minutes
@@ -165,6 +175,8 @@ class FeatureFlagManager {
   private async fetchFlags(): Promise<void> {
     const FETCH_TIMEOUT_MS = 3000;
     const controller = new AbortController();
+    this.activeFetchController?.abort();
+    this.activeFetchController = controller;
     const abortTimeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     let hardTimeoutHandle: NodeJS.Timeout | undefined;
 
@@ -198,6 +210,10 @@ class FeatureFlagManager {
       
       const config: FeatureFlags = await response.json();
       
+      // A shutdown may land while the request is in flight. Do not mutate
+      // process-wide flag state after destroy() has revoked this fetch.
+      if (this.destroyed || controller.signal.aborted) return;
+
       // Update flags
       if (config.flags) {
         this.flags = config.flags;
@@ -214,6 +230,9 @@ class FeatureFlagManager {
       clearTimeout(abortTimeout);
       if (hardTimeoutHandle) {
         clearTimeout(hardTimeoutHandle);
+      }
+      if (this.activeFetchController === controller) {
+        this.activeFetchController = null;
       }
     }
   }
@@ -239,10 +258,17 @@ class FeatureFlagManager {
    * Cleanup on shutdown
    */
   destroy(): void {
+    this.destroyed = true;
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
     }
+    if (this.activeFetchController) {
+      this.activeFetchController.abort();
+      this.activeFetchController = null;
+    }
+    this.resolveFreshFetch?.();
+    this.resolveFreshFetch = null;
   }
 }
 

@@ -50,6 +50,11 @@ export interface SearchSessionOptions {
  */export class SearchManager {
   private sessions = new Map<string, SearchSession>();
   private sessionCounter = 0;
+  private shuttingDown = false;
+
+  initialize(): void {
+    this.shuttingDown = false;
+  }
 
   /**
    * Start a new search session (like start_process)
@@ -64,6 +69,10 @@ export interface SearchSessionOptions {
     totalResults: number;
     runtime: number;
   }> {
+    if (this.shuttingDown) {
+      throw new Error('Search manager is shutting down; new searches are not accepted');
+    }
+
     const sessionId = `search_${++this.sessionCounter}_${Date.now()}`;
     
     // Validate path first
@@ -80,6 +89,12 @@ export interface SearchSessionOptions {
       throw new Error(`Failed to locate ripgrep binary: ${err instanceof Error ? err.message : String(err)}`);
     }
     
+    // Validation/path resolution above is asynchronous. Re-check immediately
+    // before spawn so shutdown cannot be crossed by an in-flight search call.
+    if (this.shuttingDown) {
+      throw new Error('Search manager is shutting down; new searches are not accepted');
+    }
+
     // Start ripgrep process
     const rgProcess = spawn(rgPath, args, { windowsHide: true });  // Prevent visible console windows on Windows
     
@@ -677,6 +692,32 @@ export interface SearchSessionOptions {
     return Array.from(this.sessions.values()).filter(session => !session.isComplete).length;
   }
 
+  /** Stop active search children and release process-wide cleanup timers. */
+  async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    const active = Array.from(this.sessions.values()).filter((session) => !session.isComplete);
+    for (const session of active) {
+      try {
+        session.process.kill('SIGTERM');
+      } catch { /* process already gone */ }
+    }
+
+    if (active.length > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      for (const session of active) {
+        if (!session.isComplete && session.process.exitCode === null) {
+          try {
+            session.process.kill('SIGKILL');
+          } catch { /* process already gone */ }
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    this.sessions.clear();
+    stopCleanupIfNeeded();
+  }
+
   /**
    * Detect if pattern looks like an exact filename
    * (has file extension and no glob wildcards)
@@ -1004,6 +1045,18 @@ export const searchManager = new SearchManager();
 
 // Cleanup management - run on fixed schedule
 let cleanupInterval: NodeJS.Timeout | null = null;
+let cleanupKickTimer: NodeJS.Timeout | null = null;
+
+function stopCleanupIfNeeded(): void {
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+  if (cleanupKickTimer) {
+    clearTimeout(cleanupKickTimer);
+    cleanupKickTimer = null;
+  }
+}
 
 /**
  * Start cleanup interval - now runs on fixed schedule
@@ -1013,10 +1066,13 @@ function startCleanupIfNeeded(): void {
     cleanupInterval = setInterval(() => {
       searchManager.cleanupSessions();
     }, 5 * 60 * 1000);
-    
-    // Also check immediately after a short delay (let search process finish)
-    setTimeout(() => {
+    cleanupInterval.unref?.();
+
+    // Also check immediately after a short delay (let search process finish).
+    cleanupKickTimer = setTimeout(() => {
+      cleanupKickTimer = null;
       searchManager.cleanupSessions();
     }, 1000);
+    cleanupKickTimer.unref?.();
   }
 }
