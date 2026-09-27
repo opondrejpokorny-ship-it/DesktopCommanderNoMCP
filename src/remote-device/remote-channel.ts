@@ -177,6 +177,16 @@ function isOwnedStockQueryShapeUnsupported(error: any): boolean {
     return error?.code === 'PGRST100' && error?.message === 'Invalid request';
 }
 
+export function sanitizeChildProcessError(error: any) {
+    return {
+        name: error?.name ?? null,
+        message: error?.message ?? String(error),
+        code: error?.code ?? null,
+        errno: error?.errno ?? null,
+        syscall: error?.syscall ?? null,
+    };
+}
+
 export class RemoteChannel {
     private client: SupabaseClient | null = null;
     private channel: RealtimeChannel | null = null;
@@ -1614,7 +1624,7 @@ export class RemoteChannel {
             // Handle exit codes
             if (result.error) {
                 console.error('❌ Failed to spawn update process:', result.error.message);
-                console.debug('[DEBUG] spawn error:', result.error);
+                console.debug('[DEBUG] spawn error:', sanitizeChildProcessError(result.error));
             } else if (result.status === 0) {
                 console.log('✓ Device marked as offline (blocking)');
             } else if (result.status === 2) {
