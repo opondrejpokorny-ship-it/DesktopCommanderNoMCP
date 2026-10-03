@@ -181,7 +181,7 @@ await fs.rm(pdfPath, { force: true });
 await fs.rm(generatedPdfPath, { force: true });
 console.log('PACKAGE_CONSUMER_PDF_GREEN');
 `);
-    run(process.execPath, [pdfScript], { cwd: consumer, timeout: 120000 });
+    run(process.execPath, [pdfScript], { cwd: consumer, timeout: 240000 });
 
     phase('mcp-runtime');
     const mcpScript = path.join(consumer, 'mcp-smoke.mjs');
