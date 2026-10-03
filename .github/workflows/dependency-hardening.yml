@@ -47,6 +47,11 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: 'npm'
 
+      - name: Use pinned npm
+        run: |
+          npm install --global npm@11.17.0
+          npm --version
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
@@ -80,6 +85,11 @@ jobs:
           node-version: '22.12.0'
           cache: 'npm'
 
+      - name: Use pinned npm
+        run: |
+          npm install --global npm@11.17.0
+          npm --version
+
       - name: Build package
         run: |
           npm ci --ignore-scripts
@@ -98,6 +108,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.11.0'
+
+      - name: Use pinned npm on unsupported Node
+        run: |
+          npm install --global npm@11.17.0
+          npm --version
 
       - name: Reject Node below engine floor
         shell: bash

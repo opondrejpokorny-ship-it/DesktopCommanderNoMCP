@@ -198,6 +198,11 @@ jobs:
           # from cache instead of the network on every release.
           cache: 'npm'
 
+      - name: Use pinned npm
+        run: |
+          npm install --global npm@11.17.0
+          npm --version
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
@@ -420,6 +425,11 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 
+      - name: Use pinned npm
+        run: |
+          npm install --global npm@11.17.0
+          npm --version
+
       # Lands the .mcpb next to the checkout and overwrites package.json /
       # server.json / src/version.ts with the exact files the bundle was built
       # from. On a real release those are already identical; on a rehearsal
@@ -443,11 +453,7 @@ jobs:
 
       # npm auth: OIDC trusted publishing — no token, no secret. Configured on
       # npmjs.com (package Settings → Trusted Publisher → this repo +
-      # release.yml). Needs npm >= 11.5.1; Node 22 bundles npm 10, so upgrade.
-      - name: Upgrade npm for OIDC trusted publishing
-        if: ${{ !inputs.skip_npm }}
-        run: npm install -g npm@11.17.0 && npm --version
-
+      # release.yml). The pinned npm 11.17.0 above satisfies the OIDC floor.
       - name: Publish to npm
         if: ${{ !inputs.skip_npm }}
         env:
