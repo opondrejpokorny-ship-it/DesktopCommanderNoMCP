@@ -366,6 +366,11 @@ async function postTelemetryPayload(endpoint, postData, options) {
  */
 async function main() {
     try {
+        if (process.env.DC_DISABLE_INSTALL_TELEMETRY === '1') {
+            debug('Installation telemetry disabled by DC_DISABLE_INSTALL_TELEMETRY=1');
+            return;
+        }
+
         log('Package installation detected');
         
         const installationData = await detectInstallationSource();

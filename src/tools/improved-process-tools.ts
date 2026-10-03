@@ -10,11 +10,32 @@ import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { init as initModuleLexer, parse as parseModuleImports } from 'es-module-lexer';
 
 // Get the directory where the MCP is installed (for ES module imports)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const mcpRoot = path.resolve(__dirname, '..', '..');
+const vendoredExcelJsSpecifier = './vendor/exceljs/index.js';
+
+export async function rewriteNodeLocalModuleSpecifiers(code: string): Promise<string> {
+  await initModuleLexer;
+  const [imports] = parseModuleImports(code);
+  let rewritten = code;
+
+  for (const entry of [...imports].reverse()) {
+    if (entry.n !== 'exceljs') continue;
+
+    const original = code.slice(entry.s, entry.e);
+    const replacement = entry.d === -1
+      ? vendoredExcelJsSpecifier
+      : `${original[0]}${vendoredExcelJsSpecifier}${original[original.length - 1]}`;
+
+    rewritten = rewritten.slice(0, entry.s) + replacement + rewritten.slice(entry.e);
+  }
+
+  return rewritten;
+}
 
 // Track virtual Node sessions (PIDs that are actually Node fallback sessions)
 const virtualNodeSessions = new Map<number, { timeout_ms: number }>();
@@ -28,7 +49,7 @@ async function executeNodeCode(code: string, timeout_ms: number = 30000): Promis
   const tempFile = path.join(mcpRoot, `.mcp-exec-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`);
 
   try {
-    await fs.writeFile(tempFile, code, 'utf8');
+    await fs.writeFile(tempFile, await rewriteNodeLocalModuleSpecifiers(code), 'utf8');
 
     const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
       const proc = spawn(process.execPath, [tempFile], {

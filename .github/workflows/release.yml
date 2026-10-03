@@ -107,7 +107,8 @@ env:
   # @vscode/ripgrep's postinstall queries api.github.com; unauthenticated calls
   # rate-limit on shared runner IPs. Also authenticates the gh CLI steps.
   GITHUB_TOKEN: ${{ github.token }}
-  # Chrome is never launched in this workflow (puppeteer is a transitive dep).
+  # Skip Puppeteer's install-time browser download. The packaged-consumer gate
+  # exercises PDF generation with system Chrome when available, or the runtime fallback.
   PUPPETEER_SKIP_DOWNLOAD: '1'
   REGISTRY_VERSION_URL: 'https://registry.modelcontextprotocol.io/v0.1/servers/io.github.wonderwhy-er%2Fdesktop-commander/versions'
 
@@ -189,7 +190,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22.12.0'
           registry-url: 'https://registry.npmjs.org'
           # Caches the npm download cache keyed on package-lock.json, so
           # npm ci (and the bundle install inside build:mcpb) pull packages
@@ -198,6 +199,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify packaged consumer graph
+        run: |
+          npm run build
+          node scripts/verify-vendor-provenance.cjs
+          node scripts/verify-vendor-upstream.cjs
+          npm run test:package-consumer
+          npm audit --omit=dev
 
       # Cut mode does in CI what the local script does locally: test first,
       # then bump, commit, tag. Tag-push releases assume the local script
@@ -385,7 +394,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22.12.0'
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 

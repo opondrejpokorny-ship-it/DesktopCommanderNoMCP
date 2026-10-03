@@ -394,7 +394,7 @@ export interface SearchSessionOptions {
     }
 
     // Dynamically import ExcelJS to search all sheets
-    const ExcelJS = await import('exceljs');
+    const ExcelJS = await import('../vendor/exceljs/index.js');
 
     for (const filePath of excelFiles) {
       if (maxResults && results.length >= maxResults) break;
