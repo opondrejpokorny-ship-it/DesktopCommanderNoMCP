@@ -68,7 +68,7 @@ async function main() {
     phase('isolated-install');
     const install = runNpm(
       ['install', tarballPath, '--ignore-scripts', '--omit=dev', '--engine-strict', '--no-audit', '--no-fund'],
-      { cwd: consumer },
+      { cwd: consumer, timeout: 600000 },
     );
     const installOutput = `${install.stdout}\n${install.stderr}`;
     const deprecatedLines = installOutput
@@ -236,6 +236,7 @@ try {
     runNpm(['install', tarballPath, '--omit=dev', '--engine-strict', '--no-audit', '--no-fund'], {
       cwd: normalConsumer,
       env: { DC_DISABLE_INSTALL_TELEMETRY: '1' },
+      timeout: 600000,
     });
 
     const normalInstalledRoot = path.join(
