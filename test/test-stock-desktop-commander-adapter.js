@@ -32,7 +32,7 @@ async function main() {
   assert.match(serverSource, /from ['"]\.\/stock-tool-catalog\.js['"]/);
   assert.doesNotMatch(serverSource, /const allTools\s*=\s*\[/);
 
-  const root = await fs.mkdtemp(path.join(testHome, 'allowed-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(testHome, 'allowed-')));
   const fixture = path.join(root, 'fixture.txt');
   await fs.writeFile(fixture, 'alpha\nbeta\n', 'utf8');
 
