@@ -1,0 +1,51 @@
+{
+  "name": "md-to-pdf",
+  "version": "5.2.5",
+  "description": "CLI tool for converting Markdown files to PDF.",
+  "keywords": [
+    "markdown-to-pdf",
+    "cli",
+    "pdf-generation",
+    "documentation",
+    "assignments",
+    "homework",
+    "markdown",
+    "pdf",
+    "puppeteer",
+    "headless-chrome",
+    "html-to-pdf"
+  ],
+  "engines": {
+    "node": ">=12.0"
+  },
+  "files": [
+    "/dist",
+    "markdown.css"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "md-to-pdf": "dist/cli.js",
+    "md2pdf": "dist/cli.js"
+  },
+  "author": "Simon Haenisch (https://github.com/simonhaenisch)",
+  "license": "MIT",
+  "repository": "simonhaenisch/md-to-pdf",
+  "homepage": "https://github.com/simonhaenisch/md-to-pdf#readme",
+  "dependencies": {
+    "arg": "^5.0.2",
+    "chalk": "^4.1.2",
+    "chokidar": "^4.0.3",
+    "get-port": "^5.1.1",
+    "get-stdin": "^8.0.0",
+    "gray-matter": "^4.0.3",
+    "highlight.js": "^11.7.0",
+    "iconv-lite": "^0.6.3",
+    "listr": "^0.14.3",
+    "marked": "^4.2.12",
+    "puppeteer": ">=8.0.0",
+    "semver": "^7.3.7",
+    "serve-handler": "^6.1.3"
+  },
+  "private": true
+}

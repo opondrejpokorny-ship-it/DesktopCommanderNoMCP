@@ -1,0 +1,2 @@
+vendor/exceljs/** text eol=lf -whitespace
+vendor/md-to-pdf/** text eol=lf -whitespace

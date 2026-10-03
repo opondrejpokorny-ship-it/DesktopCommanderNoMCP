@@ -3,7 +3,7 @@
  * Handles reading, writing, and editing Excel files (.xlsx, .xls, .xlsm)
  */
 
-import ExcelJS from 'exceljs';
+import ExcelJS from '../../../vendor/exceljs/index.js';
 import fs from 'fs/promises';
 import {
     FileHandler,

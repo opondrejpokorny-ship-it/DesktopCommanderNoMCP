@@ -81,6 +81,7 @@ console.log('✅ Created manifest.json');
 // Step 5: Copy necessary files
 const filesToCopy = [
     'dist',
+    'vendor',
     'package.json',
     'README.md',
     'LICENSE',
@@ -106,6 +107,25 @@ filesToCopy.forEach(file => {
     }
 });
 
+// Fail closed if a vendored runtime file required by compiled imports or
+// license/provenance policy is missing from the bundle staging directory.
+const requiredVendoredBundleFiles = [
+    'vendor/exceljs/index.js',
+    'vendor/exceljs/LICENSE',
+    'vendor/md-to-pdf/dist/index.js',
+    'vendor/md-to-pdf/license',
+    'vendor/provenance.json'
+];
+
+for (const relativePath of requiredVendoredBundleFiles) {
+    const bundledPath = path.join(BUNDLE_DIR, relativePath);
+    if (!fs.existsSync(bundledPath)) {
+        console.error(`❌ Required vendored bundle file missing: ${relativePath}`);
+        process.exit(1);
+    }
+}
+console.log('✅ Vendored runtime files included in bundle staging');
+
 // Step 6: Create package.json in bundle with production dependencies from main package.json
 // This ensures MCPB bundle always has the same dependencies as the npm package
 const bundlePackageJson = {
@@ -117,7 +137,8 @@ const bundlePackageJson = {
     author: manifest.author,
     license: manifest.license,
     repository: manifest.repository,
-    dependencies: packageJson.dependencies // Use dependencies directly from package.json
+    dependencies: packageJson.dependencies, // Use dependencies directly from package.json
+    optionalDependencies: packageJson.optionalDependencies
 };
 
 fs.writeFileSync(

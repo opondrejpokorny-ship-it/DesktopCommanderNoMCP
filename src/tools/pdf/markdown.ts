@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import { existsSync, readdirSync } from 'fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path';
-import { mdToPdf } from 'md-to-pdf';
+import { mdToPdf } from '../../../vendor/md-to-pdf/dist/index.js';
 import type { PageRange } from './lib/pdf2md.js';
 import { PdfParseResult, pdf2md } from './lib/pdf2md.js';
 import { CONFIG_FILE } from '../../config.js';
