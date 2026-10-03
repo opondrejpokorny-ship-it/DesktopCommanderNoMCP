@@ -25,4 +25,11 @@ assert.ok(rewritten.includes("// import Fake from 'exceljs';"), 'comments must n
 assert.ok(rewritten.includes("const template = `import Fake from 'exceljs';`;"), 'template literal text must not be rewritten');
 assert.ok(rewritten.includes("const regex = /from 'exceljs'/;"), 'regex literals must not be rewritten');
 
+const invalidSyntax = "const broken = await import('exceljs'";
+assert.equal(
+  await rewriteNodeLocalModuleSpecifiers(invalidSyntax),
+  invalidSyntax,
+  'lexer parse failures must fall back to the original code so Node reports the syntax error',
+);
+
 console.log('NODE_LOCAL_VENDORED_IMPORT_GREEN');

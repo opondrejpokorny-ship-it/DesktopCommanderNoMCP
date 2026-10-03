@@ -26,6 +26,8 @@ This directory contains source snapshots that are shipped inside the DesktopComm
 - Purpose here: preserve the existing PDF API while replacing the vulnerable chokidar 3/braces runtime branch.
 - Local dependency metadata change: chokidar is constrained to ^4.0.3. The root package explicitly declares the runtime dependencies needed by the vendored code.
 
-`vendor/provenance.json` records the SHA-256 of every shipped vendor file. `scripts/verify-vendor-provenance.cjs` is the tamper-evident CI gate; regenerate the manifest only after reviewing and documenting an intentional vendor refresh.
+`vendor/provenance.json` records the SHA-256 of every shipped vendor file. `scripts/verify-vendor-provenance.cjs` is the tamper-evident CI gate; `scripts/verify-vendor-upstream.cjs` re-fetches the integrity-pinned npm tarballs and checks the narrow local-change allowlist; `scripts/verify-vendor-advisories.cjs` queries OSV for direct advisories on the vendored package versions; and `scripts/verify-vendor-tracking.cjs` proves every provenance-listed file is present in the Git index.
+
+The upstream `dist/` directories are intentionally tracked even though the repository globally ignores build `dist/` output: they are vendored runtime source inputs required by the npm package and MCPB bundle, not local build artifacts.
 
 Do not remove the retained license files or the package publish/consumer regression tests when updating these snapshots. Any future vendor refresh must re-run the clean npm pack -> fresh consumer install -> runtime Excel/PDF exercises and npm audit --omit=dev.

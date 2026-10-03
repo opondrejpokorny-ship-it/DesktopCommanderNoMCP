@@ -6,6 +6,9 @@ yarn-error.log*
 
 # TypeScript build output
 dist/
+# Vendored runtime distributions are source inputs and must be tracked.
+!vendor/**/dist/
+!vendor/**/dist/**
 *.tsbuildinfo
 
 # IDE and editor files

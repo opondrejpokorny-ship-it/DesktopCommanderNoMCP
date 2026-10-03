@@ -65,7 +65,9 @@
     "logs:export": "npm run build && node scripts/export-fuzzy-logs.js",
     "count-tokens": "npm run build && node scripts/count-tokens.js",
     "count-tokens:json": "npm run build && node scripts/count-tokens.js --json",
-    "test:package-consumer": "node scripts/verify-package-consumer.cjs"
+    "test:package-consumer": "node scripts/verify-package-consumer.cjs",
+    "test:dependency-hardening": "node test/test-runtime-dependency-security.js && node test/test-transitive-runtime-security.js && node test/test-pdf-dependency-hygiene.js && node test/test-pdf-runtime-compat.js && node test/test-excel-dependency-security.js && node test/test-excel-transitive-compat.js && node test/test-production-dependency-deprecations.js && node test/test-package-publish-safety.js && node test/test-node-local-vendored-import.js && node scripts/verify-vendor-provenance.cjs && node scripts/verify-vendor-upstream.cjs && node scripts/verify-vendor-advisories.cjs && npm run test:vendor-tracking && npm run test:package-consumer && npm audit --omit=dev",
+    "test:vendor-tracking": "node scripts/verify-vendor-tracking.cjs"
   },
   "publishConfig": {
     "access": "public"

@@ -124,6 +124,7 @@ jobs:
       tag: ${{ steps.ver.outputs.tag }}
       version: ${{ steps.ver.outputs.version }}
       publish_ref: ${{ steps.publishref.outputs.ref }}
+      verified_sha: ${{ steps.verifyrelease.outputs.sha }}
     steps:
       # Four entry paths:
       #   push of a v* tag         → mode=tag, release that tag
@@ -198,22 +199,16 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      - name: Verify packaged consumer graph
-        run: |
-          npm run build
-          node scripts/verify-vendor-provenance.cjs
-          node scripts/verify-vendor-upstream.cjs
-          npm run test:package-consumer
-          npm audit --omit=dev
+      - name: Install Puppeteer Chrome for PDF tests
+        run: npx puppeteer browsers install chrome
 
-      # Cut mode does in CI what the local script does locally: test first,
-      # then bump, commit, tag. Tag-push releases assume the local script
-      # already ran the tests before tagging.
-      - name: Run tests (cut mode)
-        if: steps.mode.outputs.mode == 'cut'
+      - name: Run full test suite
         run: npm test
+
+      - name: Run dependency hardening gate
+        run: npm run test:dependency-hardening
 
       # Local only. The commit and tag stay in the runner's clone until the
       # MCPB bundle has been built and verified, so a failed build leaves
@@ -296,6 +291,18 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # The release commit may differ from the commit tested above in cut mode
+      # because the version bump creates a new commit. Gate that exact HEAD
+      # before any bundle is built, pushed, tagged remotely, or published.
+      - name: Verify exact release commit
+        id: verifyrelease
+        run: |
+          npm test
+          npm run test:dependency-hardening
+          SHA=$(git rev-parse HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Verified exact release commit $SHA"
 
       # Self-contained: downloads all-platform ripgrep binaries, builds TS,
       # stages prod-only deps, validates the manifest, packs.
@@ -389,7 +396,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.publish_ref }}
+          # Real publishes use the exact commit gated in prepare. Cut-mode
+          # rehearsals do not push their synthetic bump commit, so only that
+          # no-publish path falls back to the resolved ref plus version assets.
+          ref: ${{ needs.prepare.outputs.rehearsal == 'true' && needs.prepare.outputs.publish_ref || needs.prepare.outputs.verified_sha }}
+
+      - name: Verify publish checkout SHA
+        if: ${{ needs.prepare.outputs.rehearsal != 'true' }}
+        env:
+          EXPECTED_SHA: ${{ needs.prepare.outputs.verified_sha }}
+        run: |
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "publish checkout mismatch: actual=$ACTUAL_SHA expected=$EXPECTED_SHA"
+            exit 1
+          fi
+          echo "Publishing exact verified SHA $ACTUAL_SHA"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -417,14 +439,14 @@ jobs:
           fi
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       # npm auth: OIDC trusted publishing — no token, no secret. Configured on
       # npmjs.com (package Settings → Trusted Publisher → this repo +
       # release.yml). Needs npm >= 11.5.1; Node 22 bundles npm 10, so upgrade.
       - name: Upgrade npm for OIDC trusted publishing
         if: ${{ !inputs.skip_npm }}
-        run: npm install -g npm@latest && npm --version
+        run: npm install -g npm@11.17.0 && npm --version
 
       - name: Publish to npm
         if: ${{ !inputs.skip_npm }}

@@ -53,10 +53,10 @@ async function main() {
 
   try {
     phase('pack');
-    const pack = runNpm(['pack', '--ignore-scripts', '--json']);
+    const pack = runNpm(['pack', '--ignore-scripts', '--json', '--pack-destination', tempRoot]);
     const packResult = JSON.parse(pack.stdout);
     assert.ok(Array.isArray(packResult) && packResult[0]?.filename, 'npm pack must return a tarball filename');
-    tarballPath = path.join(repoRoot, packResult[0].filename);
+    tarballPath = path.join(tempRoot, packResult[0].filename);
 
     const consumer = path.join(tempRoot, 'consumer');
     await fsp.mkdir(consumer, { recursive: true });
@@ -67,7 +67,7 @@ async function main() {
 
     phase('isolated-install');
     const install = runNpm(
-      ['install', tarballPath, '--ignore-scripts', '--omit=dev', '--engine-strict'],
+      ['install', tarballPath, '--ignore-scripts', '--omit=dev', '--engine-strict', '--no-audit', '--no-fund'],
       { cwd: consumer },
     );
     const installOutput = `${install.stdout}\n${install.stderr}`;
@@ -187,18 +187,29 @@ console.log('PACKAGE_CONSUMER_PDF_GREEN');
     const mcpScript = path.join(consumer, 'mcp-smoke.mjs');
     await writeScript(mcpScript, `
 import path from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 const installedRoot = path.resolve('node_modules/@wonderwhy-er/desktop-commander');
+const requireFromPackage = createRequire(path.join(installedRoot, 'package.json'));
+const clientModuleUrl = pathToFileURL(requireFromPackage.resolve('@modelcontextprotocol/sdk/client/index.js')).href;
+const stdioModuleUrl = pathToFileURL(requireFromPackage.resolve('@modelcontextprotocol/sdk/client/stdio.js')).href;
+const { Client } = await import(clientModuleUrl);
+const { StdioClientTransport } = await import(stdioModuleUrl);
+const binShim = path.resolve(
+  'node_modules',
+  '.bin',
+  process.platform === 'win32' ? 'desktop-commander.cmd' : 'desktop-commander',
+);
+
 const client = new Client(
   { name: 'package-consumer-smoke', version: '1.0.0' },
   { capabilities: {} },
 );
 const transport = new StdioClientTransport({
-  command: process.execPath,
-  args: [path.join(installedRoot, 'dist', 'index.js')],
-  cwd: installedRoot,
+  command: binShim,
+  args: [],
+  cwd: path.dirname(binShim),
   stderr: 'pipe',
   env: { ...process.env, DESKTOP_COMMANDER_DISABLE_TELEMETRY: 'true' },
 });
@@ -206,14 +217,14 @@ try {
   await client.connect(transport);
   const tools = await client.listTools();
   if (!Array.isArray(tools.tools) || tools.tools.length === 0) {
-    throw new Error('packed Desktop Commander MCP entrypoint returned no tools');
+    throw new Error('packed Desktop Commander MCP bin entrypoint returned no tools');
   }
-  console.log('PACKAGE_CONSUMER_MCP_GREEN');
+  console.log('PACKAGE_CONSUMER_MCP_BIN_GREEN');
 } finally {
   await client.close().catch(() => {});
 }
 `);
-    run(process.execPath, [mcpScript], { cwd: consumer, timeout: 30000 });
+    run(process.execPath, [mcpScript], { cwd: consumer, timeout: 60000 });
 
     phase('normal-install');
     const normalConsumer = path.join(tempRoot, 'normal-consumer');
@@ -222,7 +233,7 @@ try {
       path.join(normalConsumer, 'package.json'),
       JSON.stringify({ name: 'desktop-commander-normal-install-smoke', private: true, version: '1.0.0' }, null, 2) + '\n',
     );
-    runNpm(['install', tarballPath, '--omit=dev', '--engine-strict'], {
+    runNpm(['install', tarballPath, '--omit=dev', '--engine-strict', '--no-audit', '--no-fund'], {
       cwd: normalConsumer,
       env: { DC_DISABLE_INSTALL_TELEMETRY: '1' },
     });

@@ -9,7 +9,6 @@ permissions:
   contents: read
 
 env:
-  PUPPETEER_SKIP_DOWNLOAD: '1'
   DC_DISABLE_INSTALL_TELEMETRY: '1'
 
 jobs:
@@ -17,8 +16,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        node: ['22.12.0', '24']
+        include:
+          - os: ubuntu-latest
+            node: '22.12.0'
+            full_suite: true
+          - os: windows-latest
+            node: '22.12.0'
+            # The upstream enhanced-REPL test hardcodes command -v + /bin/bash.
+            full_suite: false
+          - os: macos-latest
+            node: '22.12.0'
+            full_suite: true
+          - os: ubuntu-latest
+            node: '24'
+            full_suite: false
+          - os: windows-latest
+            node: '24'
+            full_suite: false
+          - os: macos-latest
+            node: '24'
+            full_suite: false
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -31,30 +48,74 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build
-        run: npm run build
-
-      - name: Run dependency hardening gates
         run: |
-          node test/test-runtime-dependency-security.js
-          node test/test-transitive-runtime-security.js
-          node test/test-pdf-dependency-hygiene.js
-          node test/test-pdf-runtime-compat.js
-          node test/test-excel-dependency-security.js
-          node test/test-excel-transitive-compat.js
-          node test/test-production-dependency-deprecations.js
-          node test/test-package-publish-safety.js
-          node test/test-node-local-vendored-import.js
-          node scripts/verify-vendor-provenance.cjs
-          node scripts/verify-vendor-upstream.cjs
+          npm run build
+          node dist/npm-scripts/verify-ripgrep.js
 
-      - name: Verify packaged consumer
-        run: npm run test:package-consumer
+      - name: Install Puppeteer Chrome for PDF tests
+        run: npx puppeteer browsers install chrome
 
-      - name: Runtime audit
-        run: npm audit --omit=dev
+      - name: Run dependency hardening gate
+        run: npm run test:dependency-hardening
+
+      - name: Run full regression suite
+        if: matrix.full_suite
+        run: npm test
 
       - name: Diff hygiene
         run: git diff --check
+
+  engine-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup supported Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: 'npm'
+
+      - name: Build package
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          node dist/npm-scripts/verify-ripgrep.js
+
+      - name: Pack artifact
+        id: pack
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/engine-floor"
+          TARBALL=$(npm pack --ignore-scripts --silent --pack-destination "$RUNNER_TEMP/engine-floor")
+          echo "tarball=$RUNNER_TEMP/engine-floor/$TARBALL" >> "$GITHUB_OUTPUT"
+
+      - name: Setup unsupported Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.11.0'
+
+      - name: Reject Node below engine floor
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/engine-floor-consumer"
+          cd "$RUNNER_TEMP/engine-floor-consumer"
+          printf '{"name":"engine-floor-consumer","version":"1.0.0","private":true}\n' > package.json
+          set +e
+          OUTPUT=$(npm install "${{ steps.pack.outputs.tarball }}" --ignore-scripts --omit=dev --engine-strict 2>&1)
+          STATUS=$?
+          set -e
+          printf '%s\n' "$OUTPUT"
+          if [ "$STATUS" -eq 0 ]; then
+            echo "Expected Node 22.11.0 install to fail engine-strict, but it succeeded"
+            exit 1
+          fi
+          if ! printf '%s\n' "$OUTPUT" | grep -q 'EBADENGINE'; then
+            echo "Install failed, but not because of the declared Node engine floor"
+            exit 1
+          fi
+          echo "ENGINE_FLOOR_REJECTION_GREEN"

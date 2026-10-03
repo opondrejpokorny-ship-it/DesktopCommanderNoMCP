@@ -1,22 +1,20 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
-import { writePdf } from '../dist/tools/filesystem.js';
-import { parsePdfToMarkdown } from '../dist/tools/pdf/index.js';
+import { parseMarkdownToPdf, parsePdfToMarkdown } from '../dist/tools/pdf/index.js';
 
-const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dc-pdf-compat-'));
+const testDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/(.:)/, '$1'));
+const testOutputDir = path.join(testDir, 'test_output');
+await fs.mkdir(testOutputDir, { recursive: true });
+const tempDir = await fs.mkdtemp(path.join(testOutputDir, 'dc-pdf-compat-'));
 const generated = path.join(tempDir, 'roundtrip.pdf');
-const complex = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname.replace(/^\/(.:)/, '$1')),
-  'samples',
-  '03_sample_compex.pdf',
-);
+const complex = path.resolve(testDir, 'samples', '03_sample_compex.pdf');
 
 try {
   const marker = 'Dependency hardening PDF round-trip';
-  await writePdf(generated, `# ${marker}\n\nGenerated through md-to-pdf.`);
+  const generatedBuffer = await parseMarkdownToPdf(`# ${marker}\n\nGenerated through md-to-pdf.`);
+  await fs.writeFile(generated, generatedBuffer);
 
   const stats = await fs.stat(generated);
   assert.ok(stats.size > 1000, `generated PDF unexpectedly small: ${stats.size}`);

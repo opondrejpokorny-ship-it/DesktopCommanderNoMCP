@@ -17,6 +17,12 @@ function productionEntries(name) {
     .map(([key, value]) => ({ key, version: value.version }));
 }
 
+function productionDependents(name) {
+  return Object.entries(lock.packages ?? {})
+    .filter(([, value]) => value?.dev !== true && value?.dependencies?.[name])
+    .map(([key, value]) => ({ key: key || '<root>', range: value.dependencies[name] }));
+}
+
 for (const forbidden of ['lodash.isequal', 'fstream', 'rimraf']) {
   assert.deepEqual(
     productionEntries(forbidden),
@@ -38,6 +44,19 @@ assert.deepEqual(
   productionEntries('inflight'),
   [{ key: 'node_modules/inflight', version: '1.0.6' }],
   'only the bounded glob@7 inflight compatibility exception may remain',
+);
+assert.deepEqual(
+  productionDependents('glob'),
+  [
+    { key: 'node_modules/archiver-utils', range: '^7.1.4' },
+    { key: 'node_modules/zip-stream/node_modules/archiver-utils', range: '^7.2.3' },
+  ],
+  'glob@7 must be required only by the two archiver-utils branches under the bounded archiver@5 compatibility exception',
+);
+assert.deepEqual(
+  productionDependents('inflight'),
+  [{ key: 'node_modules/glob', range: '^1.0.4' }],
+  'inflight must be required only by the bounded glob@7 compatibility exception',
 );
 
 console.log('PRODUCTION_DEPENDENCY_DEPRECATIONS_BOUNDED');

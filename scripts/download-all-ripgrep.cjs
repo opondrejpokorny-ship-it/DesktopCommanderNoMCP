@@ -62,12 +62,15 @@ async function downloadFile(url, dest) {
       }
     }, (response) => {
       if (response.statusCode === 302 || response.statusCode === 301) {
-        // Follow redirect
+        // Drain the redirect response before following it so the underlying
+        // socket is released and the standalone downloader can exit cleanly.
+        response.resume();
         downloadFile(response.headers.location, dest).then(resolve).catch(reject);
         return;
       }
       
       if (response.statusCode !== 200) {
+        response.resume();
         reject(new Error(`Failed to download: ${response.statusCode}`));
         return;
       }

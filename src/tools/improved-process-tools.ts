@@ -19,22 +19,31 @@ const mcpRoot = path.resolve(__dirname, '..', '..');
 const vendoredExcelJsSpecifier = './vendor/exceljs/index.js';
 
 export async function rewriteNodeLocalModuleSpecifiers(code: string): Promise<string> {
-  await initModuleLexer;
-  const [imports] = parseModuleImports(code);
-  let rewritten = code;
+  try {
+    await initModuleLexer;
+    const [imports] = parseModuleImports(code);
+    let rewritten = code;
 
-  for (const entry of [...imports].reverse()) {
-    if (entry.n !== 'exceljs') continue;
+    for (const entry of [...imports].reverse()) {
+      if (entry.n !== 'exceljs') continue;
 
-    const original = code.slice(entry.s, entry.e);
-    const replacement = entry.d === -1
-      ? vendoredExcelJsSpecifier
-      : `${original[0]}${vendoredExcelJsSpecifier}${original[original.length - 1]}`;
+      const original = code.slice(entry.s, entry.e);
+      const replacement = entry.d === -1
+        ? vendoredExcelJsSpecifier
+        : `${original[0]}${vendoredExcelJsSpecifier}${original[original.length - 1]}`;
 
-    rewritten = rewritten.slice(0, entry.s) + replacement + rewritten.slice(entry.e);
+      rewritten = rewritten.slice(0, entry.s) + replacement + rewritten.slice(entry.e);
+    }
+
+    return rewritten;
+  } catch (error) {
+    if (error instanceof Error && /^Parse error @:/.test(error.message)) {
+      // Preserve pre-rewrite behavior only for invalid JavaScript: let Node
+      // surface the syntax error instead of failing earlier inside the lexer.
+      return code;
+    }
+    throw error;
   }
-
-  return rewritten;
 }
 
 // Track virtual Node sessions (PIDs that are actually Node fallback sessions)
