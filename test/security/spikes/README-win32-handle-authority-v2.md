@@ -45,3 +45,22 @@ All fixtures are created under a new random `%TEMP%` directory and removed after
 ## Next justified task
 
 Prototype root-handle/volume/inode binding and negative rename/replacement tests in the isolated spike. Instrument Windows file access externally to verify actual no-outside-read behavior in a disposable fixture. Only then consider a tightly scoped read-only Git metadata parser for a small ordinary-repository subset, with comprehensive RED tests. Never modify production/manifest/installer/customer runtime, and do not claim #41/#42 checkpoint completion.
+
+## 2026-10-09 root-identity follow-up: REWORK; atomic authority still absent
+
+Added experimental `CaptureRootIdentity(root)` and `ObserveBound(root, file, trustedRootId)` to the **test-only C# fixture**. The capture opens the root directory through a Windows handle, checks final opened path, directory/reparse attributes, and captures volume serial + file index together with a path fingerprint. The separate `ObserveBound` API checks the token before calling the original pathname-based observer and rechecks afterwards. No model-facing APIs, production source, installer, stock policy or live runtime changed.
+
+The token is **not a secure capability**: it is reconstructible and must not be treated as authorization, supplied by an untrusted caller or exposed as a model-facing parameter. The POC assumes a trusted pre-established root; real stock allowedDirectories policy binding, true root-handle-relative child resolution, trusted token custody, and cancellation remain unsolved. The public method demonstrates a stable-state root swap check, **not an atomic read boundary**.
+
+First root-binding test run was RED (missing capture API); second surfaced a malformed-token failure; after validating the fixed token shape the new suite turned GREEN. Deterministic fixture evidence:
+- Old path-only `Observe` **did return** the digest of a different directory placed at the previously approved path.
+- Bound stable-state observer returned `DENY_ROOT_IDENTITY` after the root directory was replaced, `DENY_ROOT_PATH` when original root moved, and rejected malformed identity tokens and a root junction.
+- A separate **sequential interleaving demonstration** (not a live exploit of `ObserveBound`) proved that two identity observations can both match while an insecure read between them observes an attacker-supplied replacement. This makes the unavoidable check/open/check TOCTOU limitation explicit. Post-checking cannot undo an already executed unauthorized read.
+
+Fresh combined four-suite Windows run on Cube: **24 total = 23 PASS, 0 FAIL, 1 SKIP** (file symlink privilege unavailable); junction retarget suite 300 observations and 367 retargets. Test-only `node --test test/security/spikes/win32-handle-authority-v2-root-binding.test.cjs` reproduces the new edge cases.
+
+**Next security prerequisite:** a proof of handle-relative/no-reparse traversal anchored to the *same already-authorized root directory handle*, kernel-level file-OPEN/READ tracing, and verified refusal of any file outside the root under deliberate parent/ancestor renames. Extend to configs, packs, refs and macOS separately. Do not integrate #41/#42 or claim a Git subprocess is sandboxed on the strength of these tests.
+
+Build verification on the isolated branch: `npm ci --ignore-scripts --no-audit --no-fund` completed successfully, then `npm run build` exited 0. **Do not run broad `npm test` on the shared Cube login without independently isolated HOME/config:** its `test/test.js` changes `configManager.allowedDirectories` in the user's `~/.claude-server-commander/config.json`; a broad-suite attempt was intentionally terminated at that first module upon inspecting its source. No full-suite PASS is claimed. Post-stop metadata inspection showed four configured allowed directories and none matching this spike test directory; no pre-run content digest exists, so this is not proof of no transient configuration mutation.
+
+Codex CLI Terra source-direct read-only review was attempted and blocked by managed file-read policy; no independent source-reviewed security verdict is claimed. The fixed C# helper remains research-only despite passing its narrow tests.

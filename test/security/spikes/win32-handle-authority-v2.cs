@@ -93,4 +93,99 @@ public static class Win32HandleAuthorityV2
             return "DENY_ERROR";
         }
     }
+
+    // EXPERIMENTAL ONLY. Must be captured and held by a trusted authority,
+    // not supplied or replaceable by an untrusted caller/model.
+    public static string CaptureRootIdentity(string allowedRoot)
+    {
+        try
+        {
+            if (String.IsNullOrWhiteSpace(allowedRoot)) return "DENY_INPUT";
+            string root = Path.GetFullPath(allowedRoot).TrimEnd('\\');
+            if (root.Length < 3 || root.StartsWith(@"\\\\", StringComparison.Ordinal))
+                return "DENY_ROOT_PATH";
+
+            // FILE_READ_ATTRIBUTES + FILE_FLAG_BACKUP_SEMANTICS to open a directory.
+            using (SafeFileHandle rootHandle = OpenFile(
+                root, 0x00000080, 0x00000007, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero))
+            {
+                if (rootHandle == null || rootHandle.IsInvalid) return "DENY_ROOT_OPEN";
+                FileInfoByHandle info;
+                if (!GetFileInformationByHandle(rootHandle, out info))
+                    return "DENY_ROOT_IDENTITY";
+                if ((info.Attributes & 0x00000010) == 0 ||
+                    (info.Attributes & 0x00000400) != 0)
+                    return "DENY_ROOT_ATTRIBUTES";
+
+                StringBuilder buffer = new StringBuilder(32768);
+                uint length = FinalPath(rootHandle, buffer, (uint)buffer.Capacity, 0);
+                if (length == 0 || length >= buffer.Capacity)
+                    return "DENY_ROOT_PATH";
+                string final = buffer.ToString();
+                if (!final.StartsWith(@"\\?\", StringComparison.Ordinal))
+                    return "DENY_ROOT_PATH";
+                final = final.Substring(4);
+                if (final.StartsWith("UNC\\", StringComparison.OrdinalIgnoreCase) ||
+                    final.StartsWith("Volume{", StringComparison.OrdinalIgnoreCase))
+                    return "DENY_ROOT_PATH";
+                string actual = Path.GetFullPath(final).TrimEnd('\\');
+                if (!actual.Equals(root, StringComparison.OrdinalIgnoreCase))
+                    return "DENY_ROOT_PATH";
+
+                string canonicalPath = root.ToUpperInvariant();
+                using (SHA256 sha = SHA256.Create())
+                {
+                    byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(canonicalPath));
+                    string pathDigest = BitConverter.ToString(hash)
+                        .Replace("-", "").ToLowerInvariant();
+                    return String.Format(
+                        "ROOT:{0:X8}-{1:X8}-{2:X8}-{3}",
+                        info.VolumeSerial, info.FileIndexHigh,
+                        info.FileIndexLow, pathDigest);
+                }
+            }
+        }
+        catch
+        {
+            return "DENY_ROOT_ERROR";
+        }
+    }
+
+    // Stable-state negative check only: a root rename/replace between these
+    // calls can still enable an unauthorized file OPEN/READ inside Observe().
+    // Do not mistake pre/post checks for atomic filesystem confinement.
+    public static string ObserveBound(
+        string allowedRoot, string requestedFile, string trustedRootId)
+    {
+        if (String.IsNullOrWhiteSpace(trustedRootId) ||
+            !System.Text.RegularExpressions.Regex.IsMatch(
+                trustedRootId,
+                @"^ROOT:[A-F0-9]{8}-[A-F0-9]{8}-[A-F0-9]{8}-[a-f0-9]{64}$",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+            return "DENY_ROOT_IDENTITY";
+
+        string rootPath;
+        try { rootPath = Path.GetFullPath(allowedRoot).TrimEnd('\\'); }
+        catch { return "DENY_ROOT_PATH"; }
+        string expectedDigest;
+        using (SHA256 sha = SHA256.Create())
+            expectedDigest = BitConverter.ToString(
+                sha.ComputeHash(Encoding.UTF8.GetBytes(rootPath.ToUpperInvariant())))
+                .Replace("-", "").ToLowerInvariant();
+
+        if (!trustedRootId.EndsWith("-" + expectedDigest, StringComparison.Ordinal))
+            return "DENY_ROOT_PATH";
+
+        string current = CaptureRootIdentity(allowedRoot);
+        if (!String.Equals(current, trustedRootId, StringComparison.Ordinal))
+            return "DENY_ROOT_IDENTITY";
+
+        string observation = Observe(allowedRoot, requestedFile);
+        // Useful diagnostic, NOT prevention of an already executed read.
+        if (!String.Equals(CaptureRootIdentity(allowedRoot),
+            trustedRootId, StringComparison.Ordinal))
+            return "DENY_ROOT_IDENTITY";
+
+        return observation;
+    }
 }
