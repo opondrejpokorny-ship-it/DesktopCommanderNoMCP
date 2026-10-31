@@ -1,0 +1,68 @@
+# Opt-in verification only: never run untrusted fork pull requests on a persistent PC.
+# The existing multi-OS, PostgreSQL and release workflows stay on their existing runners.
+name: RDC Windows self-hosted acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rdc-windows-acceptance-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  trusted-main-windows:
+    if: >-
+      github.repository == 'opondrejpokorny-ship-it/DesktopCommanderNoMCP'
+      && github.event_name == 'workflow_dispatch'
+      && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64, desktop-commander-nomcp, desktop-q1hop8l]
+    timeout-minutes: 20
+    steps:
+      - name: Verify exact registered runner
+        shell: powershell
+        run: |
+          if ($env:RUNNER_NAME -ne 'DESKTOP-Q1HOP8L-nomcp') {
+            throw "Unexpected runner name: $env:RUNNER_NAME"
+          }
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'Windows runner required' }
+          Write-Output 'RDC_DEDICATED_RUNNER_IDENTITY_OK'
+
+      - name: Checkout trusted main only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify checked-out ref
+        shell: powershell
+        run: |
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) {
+            throw "Checkout SHA mismatch"
+          }
+          Write-Output 'RDC_TRUSTED_SHA_OK'
+
+      - name: Node 22.12.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+
+      - name: Install without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Build package
+        run: npm run build
+
+      - name: Check packaged ripgrep
+        run: node dist/npm-scripts/verify-ripgrep.js
+
+      - name: Existing dependency-hardening tests
+        run: npm run test:dependency-hardening
+
+
+      - name: Diff hygiene
+        shell: powershell
+        run: git diff --check
